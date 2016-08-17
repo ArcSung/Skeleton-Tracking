@@ -263,7 +263,7 @@ Mat findSkinColor(Mat src)
             drawContours(drawing, contours, i, Scalar(255), CV_FILLED, 8, hierarchy);
         }
     } 
-    //imshow("skin color", drawing);
+    imshow("skin color", drawing);
 
     return drawing;
 }    
@@ -275,7 +275,8 @@ Point findArm(Mat EDT, Point lShoulder, int fheight, int findLeftelbow)
     Point elbow = lShoulder;
 
     Mat proc;
-    inRange(EDT, Scalar(refValue - 3 > 0? refValue -3 : 2), Scalar(refValue + 3), proc);
+    inRange(EDT, Scalar(refValue - 30 > 0? refValue - 30 : 2), Scalar(refValue + 3), proc);
+    //erode(proc, proc, Mat());
     imshow("proc", proc);
 
     for(int i = 0; i < 6; i++)
@@ -289,7 +290,9 @@ Point findArm(Mat EDT, Point lShoulder, int fheight, int findLeftelbow)
            {   
                for(int x = elbow.x - fheight/5; x < elbow.x + fheight/5; x++)
                {
-                  if(proc.at<unsigned char>(y, x) != 0)
+                  if(proc.at<unsigned char>(y, x) != 0
+                    && y >= 0 && y <= EDT.rows -1 
+                    && x >= 0 && x <= EDT.cols -1)
                   {
                        search = Point(x, y);
                        find = true;
@@ -301,7 +304,9 @@ Point findArm(Mat EDT, Point lShoulder, int fheight, int findLeftelbow)
            {
                for(int x = elbow.x + fheight/5; x > elbow.x - fheight/5; x--)
                {
-                  if(proc.at<unsigned char>(y, x) != 0)
+                  if(proc.at<unsigned char>(y, x) != 0
+                        && y >= 0 && y <= EDT.rows -1 
+                        && x >= 0 && x <= EDT.cols -1)
                   {
                        search = Point(x, y);
                        find = true;
@@ -366,7 +371,9 @@ Point findHand(Mat Skin, Point rElbow, int FWidth)
     for(int x = rElbow.x - FWidth; x < rElbow.x + FWidth; x++)
         for(int y = rElbow.y - FWidth; y < rElbow.y + FWidth; y++)
         {
-            if(labelImage.at<int>(y,x) == label)
+            if(labelImage.at<int>(y,x) == label 
+                    && y >= 0 && y <= Skin.rows -1 
+                    && x >= 0 && x <= Skin.cols -1)
             {    
                 procD =CalcuDistance(rElbow, Point(x,y));
                 if(procD > maxD)
