@@ -43,6 +43,114 @@ double CalcuDistance(Point P1, Point P2)
     return norm(P1 - P2);
 }    
 
+/**
+ * Perform one thinning iteration.
+ * Normally you wouldn't call this function directly from your code.
+ * * Parameters:
+ * 		im    Binary image with range = [0,1]
+ * 		iter  0=even, 1=odd
+ */
+void thinningIteration(cv::Mat& img, int iter)
+{
+    CV_Assert(img.channels() == 1);
+    CV_Assert(img.depth() != sizeof(uchar));
+    CV_Assert(img.rows > 3 && img.cols > 3);
+
+    cv::Mat marker = cv::Mat::zeros(img.size(), CV_8UC1);
+
+    int nRows = img.rows;
+    int nCols = img.cols;
+
+    if (img.isContinuous()) {
+        nCols *= nRows;
+        nRows = 1;
+    }
+
+    int x, y;
+    uchar *pAbove;
+    uchar *pCurr;
+    uchar *pBelow;
+    uchar *nw, *no, *ne;    // north (pAbove)
+    uchar *we, *me, *ea;
+    uchar *sw, *so, *se;    // south (pBelow)
+
+    uchar *pDst;
+
+    // initialize row pointers
+    pAbove = NULL;
+    pCurr  = img.ptr<uchar>(0);
+    pBelow = img.ptr<uchar>(1);
+
+    for (y = 1; y < img.rows-1; ++y) {
+        // shift the rows up by one
+        pAbove = pCurr;
+        pCurr  = pBelow;
+        pBelow = img.ptr<uchar>(y+1);
+
+        pDst = marker.ptr<uchar>(y);
+
+        // initialize col pointers
+        no = &(pAbove[0]);
+        ne = &(pAbove[1]);
+        me = &(pCurr[0]);
+        ea = &(pCurr[1]);
+        so = &(pBelow[0]);
+        se = &(pBelow[1]);
+
+        for (x = 1; x < img.cols-1; ++x) {
+            // shift col pointers left by one (scan left to right)
+            nw = no;
+            no = ne;
+            ne = &(pAbove[x+1]);
+            we = me;
+            me = ea;
+            ea = &(pCurr[x+1]);
+            sw = so;
+            so = se;
+            se = &(pBelow[x+1]);
+
+            int A  = (*no == 0 && *ne == 1) + (*ne == 0 && *ea == 1) + 
+                     (*ea == 0 && *se == 1) + (*se == 0 && *so == 1) + 
+                     (*so == 0 && *sw == 1) + (*sw == 0 && *we == 1) +
+                     (*we == 0 && *nw == 1) + (*nw == 0 && *no == 1);
+            int B  = *no + *ne + *ea + *se + *so + *sw + *we + *nw;
+            int m1 = iter == 0 ? (*no * *ea * *so) : (*no * *ea * *we);
+            int m2 = iter == 0 ? (*ea * *so * *we) : (*no * *so * *we);
+
+            if (A == 1 && (B >= 2 && B <= 6) && m1 == 0 && m2 == 0)
+                pDst[x] = 1;
+        }
+    }
+
+    img &= ~marker;
+}
+
+/**
+ * Function for thinning the given binary image
+ *
+ * Parameters:
+ * 		src  The source image, binary with range = [0,255]
+ * 		dst  The destination image
+ */
+void thinning(const cv::Mat& src, cv::Mat& dst)
+{
+    dst = src.clone();
+    dst /= 255;         // convert to binary image
+
+    cv::Mat prev = cv::Mat::zeros(dst.size(), CV_8UC1);
+    cv::Mat diff;
+
+    do {
+        thinningIteration(dst, 0);
+        thinningIteration(dst, 1);
+        cv::absdiff(dst, prev, diff);
+        dst.copyTo(prev);
+    } 
+    while (cv::countNonZero(diff) > 0);
+
+    dst *= 255;
+}
+
 void detectAndDraw( Mat& img, CascadeClassifier& cascade,
                     double scale, Mat disp, Mat& mask)
 {
@@ -101,15 +209,15 @@ void detectAndDraw( Mat& img, CascadeClassifier& cascade,
         DT = findDistTran(mask);
 
         //find right arm
-        EDT = CalcuEDT(DT, body_skeleton.rShoulder);
-        body_skeleton.rElbow = findArm(EDT, body_skeleton.rShoulder, r->width*0.8, 0);
-        body_skeleton.rHand = findHand(Skin, body_skeleton.rElbow, r->height*1.0);
+        //EDT = CalcuEDT(DT, body_skeleton.rShoulder);
+        body_skeleton.rElbow = findArm(DT, body_skeleton.rShoulder, r->width*1.0, 0);
+        body_skeleton.rHand = findHand(Skin, body_skeleton.rElbow, r->height*1.5);
 
         waitKey(0);
         //find left arm
-        EDT = CalcuEDT(DT, body_skeleton.lShoulder);
-        body_skeleton.lElbow = findArm(EDT, body_skeleton.lShoulder, r->width*0.8, 1);
-        body_skeleton.lHand = findHand(Skin, body_skeleton.lElbow, r->height*1.0);
+        //EDT = CalcuEDT(DT, body_skeleton.lShoulder);
+        body_skeleton.lElbow = findArm(DT, body_skeleton.lShoulder, r->width*1.0, 1);
+        body_skeleton.lHand = findHand(Skin, body_skeleton.lElbow, r->height*1.5);
 
         rectangle( img, cvPoint(cvRound(r->x*scale), cvRound(r->y*scale)),
                     cvPoint(cvRound((r->x + r->width-1)*scale), cvRound((r->y + r->height-1)*scale)),
@@ -161,8 +269,10 @@ Mat findDistTran(Mat bw)
     // Normalize the distance image for range = {0.0, 1.0}
     // so we can visualize and threshold it
     normalize(dist, dist, 0, 1, NORM_MINMAX);
+    dist.convertTo(dist, CV_8UC1, 255);
+    //thinning(bw, dist);
     //namedWindow("Distance Transform Image", 0);
-    //imshow("Distance Transform Image", dist);
+    imshow("Distance Transform Image", dist);
     return dist;
 }
 
@@ -273,26 +383,28 @@ Point findArm(Mat EDT, Point lShoulder, int fheight, int findLeftelbow)
     float Slope = 0;
     float refValue = EDT.at<unsigned char>(lShoulder.x, lShoulder.y);
     Point elbow = lShoulder;
-
     Mat proc;
+    GaussianBlur(EDT, proc, Size(5, 5), 0);
     inRange(EDT, Scalar(refValue - 30 > 0? refValue - 30 : 2), Scalar(refValue + 3), proc);
+    //threshold( proc, proc, 0, 255, THRESH_BINARY|THRESH_OTSU );
     //erode(proc, proc, Mat());
     imshow("proc", proc);
 
-    for(int i = 0; i < 6; i++)
+    for(int i = 0; i < 5; i++)
     {
         bool find = false; 
         Point search;
         float TempSlope = 0;
-        for(int y = elbow.y + fheight/5; y > elbow.y - fheight/5; y--)
+        for(int y = elbow.y + fheight/4; y > elbow.y - fheight/4; y--)
         {    
            if(findLeftelbow == 1)
            {   
-               for(int x = elbow.x - fheight/5; x < elbow.x + fheight/5; x++)
+               for(int x = elbow.x - fheight/4; x < elbow.x + fheight/4; x++)
                {
                   if(proc.at<unsigned char>(y, x) != 0
                     && y >= 0 && y <= EDT.rows -1 
-                    && x >= 0 && x <= EDT.cols -1)
+                    && x >= 0 && x <= EDT.cols -1
+                    && x < lShoulder.x)
                   {
                        search = Point(x, y);
                        find = true;
@@ -302,11 +414,12 @@ Point findArm(Mat EDT, Point lShoulder, int fheight, int findLeftelbow)
            }
            else
            {
-               for(int x = elbow.x + fheight/5; x > elbow.x - fheight/5; x--)
+               for(int x = elbow.x + fheight/4; x > elbow.x - fheight/4; x--)
                {
                   if(proc.at<unsigned char>(y, x) != 0
                         && y >= 0 && y <= EDT.rows -1 
-                        && x >= 0 && x <= EDT.cols -1)
+                        && x >= 0 && x <= EDT.cols -1
+                        && x > lShoulder.x)
                   {
                        search = Point(x, y);
                        find = true;
@@ -327,13 +440,13 @@ Point findArm(Mat EDT, Point lShoulder, int fheight, int findLeftelbow)
         }
 
         printf("Slope %f, TempSlope %f\n", Slope, TempSlope);
+        if(abs(Slope - TempSlope) > 0.4 && i > 4)
+            break;     
 
         if(find == true)
         {
             Slope = TempSlope;
             elbow = search;
-            if(abs(Slope - TempSlope) > 0.4)
-                break;     
         }    
     }    
 
